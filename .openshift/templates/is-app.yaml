@@ -1,0 +1,42 @@
+apiVersion: template.openshift.io/v1
+kind: Template
+labels:
+  app: ${APPLICATION_NAME}
+  template: ${APPLICATION_NAME}-is-template
+metadata:
+  annotations:
+  labels:
+  name: ${APPLICATION_NAME}
+  namespace: ${TARGET_NAMESPACE}
+objects:
+- apiVersion: image.openshift.io/v1
+  kind: ImageStream
+  metadata:
+    annotations:
+    name: ${APPLICATION_NAME}
+    namespace: ${TARGET_NAMESPACE}
+  spec:
+    lookupPolicy:
+      local: false
+    tags:
+    - annotations: null
+      from:
+        kind: DockerImage
+        name: ${APPLICATION_NAME}
+      #generation: 3
+      importPolicy:
+        importMode: Legacy
+      name: latest
+      referencePolicy:
+        type: Source
+parameters:
+- description: The name of the application.
+  displayName: Application name
+  name: APPLICATION_NAME
+  required: true
+  value: springboot-postgres-demo
+- description: The target namespace for object list.
+  displayName: Target namespace
+  name: TARGET_NAMESPACE
+  required: true
+  value: appteam1-demo-dev

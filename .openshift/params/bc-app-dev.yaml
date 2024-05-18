@@ -1,0 +1,10 @@
+APPLICATION_NAME=springboot-postgres-demo
+TARGET_NAMESPACE=appteam1-demo-dev
+OUTPUT_IMAGE_STREAM_NAME=springboot-postgres-demo
+OUTPUT_IMAGE_STREAM_TAG=latest
+SOURCE_REPO_URI=git@github.com:abryson-redhat/springboot-postgres-demo.git
+SOURCE_REPO_REF=main
+SOURCE_SSH_SECRET=git-ssh
+INPUT_IMAGE_STREAM_NAME=ubi8-openjdk-11
+INPUT_IMAGE_STREAM_TAG=1.12
+INPUT_IMAGE_STREAM_NAMESPACE=openshift

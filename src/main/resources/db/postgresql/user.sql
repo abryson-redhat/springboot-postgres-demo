@@ -1,0 +1,4 @@
+CREATE ROLE petclinic;
+ALTER ROLE petclinic WITH LOGIN;
+CREATE DATABASE petclinic;
+GRANT ALL PRIVILEGES ON DATABASE petclinic TO petclinic;

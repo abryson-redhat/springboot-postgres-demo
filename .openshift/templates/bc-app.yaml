@@ -1,0 +1,95 @@
+apiVersion: template.openshift.io/v1
+kind: Template
+labels:
+  app: ${APPLICATION_NAME}
+  template: ${APPLICATION_NAME}-bc-template
+metadata:
+  annotations:
+  labels:
+  name: ${APPLICATION_NAME}
+  namespace: ${TARGET_NAMESPACE}
+objects:
+- apiVersion: build.openshift.io/v1
+  kind: BuildConfig
+  metadata:
+    annotations:
+    labels:
+      build: ${APPLICATION_NAME}
+    name: ${APPLICATION_NAME}
+    namespace: ${TARGET_NAMESPACE}
+  spec:
+    failedBuildsHistoryLimit: 5
+    nodeSelector: null
+    output:
+      to:
+        kind: ImageStreamTag
+        name: "${OUTPUT_IMAGE_STREAM_NAME}:${OUTPUT_IMAGE_STREAM_TAG}"
+    postCommit: {}
+    resources: {}
+    runPolicy: Serial
+    source:
+      git:
+        ref: ${SOURCE_REPO_REF}
+        uri: ${SOURCE_REPO_URI}
+      type: Git
+      sourceSecret:
+        name: ${SOURCE_SSH_SECRET}
+    strategy:
+      sourceStrategy:
+        from:
+          kind: ImageStreamTag
+          name: "${INPUT_IMAGE_STREAM_NAME}:${INPUT_IMAGE_STREAM_TAG}"
+          namespace: ${INPUT_IMAGE_STREAM_NAMESPACE}
+      type: Source
+    successfulBuildsHistoryLimit: 5
+parameters:
+- description: The name of the application.
+  displayName: Application name
+  name: APPLICATION_NAME
+  required: true
+  value: springboot-postgres-demo
+- description: The target namespace for object list.
+  displayName: Target namespace
+  name: TARGET_NAMESPACE
+  required: true
+  value: appteam1-demo-dev
+- description: Output image stream name.
+  displayName: Output image stream name
+  name: OUTPUT_IMAGE_STREAM_NAME
+  required: true
+  value: springboot-postgres-demo
+- description: Output image stream tag.
+  displayName: Output image stream tag
+  name: OUTPUT_IMAGE_STREAM_TAG
+  required: true
+  value: latest
+- description: Source repository uri
+  displayName: Source repository uri
+  name: SOURCE_REPO_URI
+  required: true
+  value: git@github.com:abryson-redhat/springboot-postgres-demo.git
+- description: Source repository ref
+  displayName: Source repository ref
+  name: SOURCE_REPO_REF
+  required: true
+  value: springboot-postgres-demo
+- description: Source SSH secret
+  displayName: Source SSH secret
+  name: SOURCE_SSH_SECRET
+  required: true
+  value: git-ssh
+- description: Input image stream name.
+  displayName: Input image stream name
+  name: INPUT_IMAGE_STREAM_NAME
+  required: true
+  value: ubi8-openjdk-17
+- description: Input image stream tag.
+  displayName: Input image stream tag
+  name: INPUT_IMAGE_STREAM_TAG
+  required: true
+  value: "1.12"
+- description: Input image stream namespace.
+  displayName: Input image stream namespace
+  name: INPUT_IMAGE_STREAM_NAMESPACE
+  required: true
+  value: openshift

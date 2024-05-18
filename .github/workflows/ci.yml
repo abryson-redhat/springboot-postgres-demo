@@ -1,0 +1,365 @@
+name: CI
+on:
+  push:
+    branches:
+      - main # the name of your main branch
+# workflow_dispatch:
+#   inputs:
+#     REPOSITORY_URL:
+#       required: true
+#       type: string
+#     IMAGE_NAME:
+#       required: true
+#       type: string
+#     IMAGE_TAG:
+#       required: true
+#       type: string
+jobs:
+  ##################################################################################################
+  ##  javabuild:                                                                                  ##
+  ##     using maven to build java archive                                                        ##
+  ##################################################################################################
+  javabuild:
+    name: BuildJavaArchive
+    environment: smbc-dev
+    runs-on: [self-hosted, java-build]
+    outputs:
+      COMMIT_SHA: ${{ steps.sha_print.outputs.COMMIT_SHA }}
+      COMMIT_SHA_DATE: ${{ steps.sha_print.outputs.COMMIT_SHA_DATE }}
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
+      # buildah action wants 2 tags.  so we create 2 tags
+      - name: Save_commit_sha
+        env:
+          SHA: sha${{ github.sha }}
+        run: |
+          echo "COMMIT_SHA=${{ env.SHA }}" >> $GITHUB_ENV
+          echo "CDATETIME=v$(date '+%Y-%m-%d_%H-%M-%S')" >> $GITHUB_ENV
+      - name: Shas_part_2
+        run: |
+          echo "COMMIT_SHA_DATE=${{ env.CDATETIME }}_${{ github.sha }}" >> $GITHUB_ENV
+          echo "${{ env.COMMIT_SHA_DATE }}" >> $GITHUB_ENV
+      - name: sha_print
+        id: sha_print
+        run: |
+          echo "COMMIT_SHA_DATE is: ${{ env.COMMIT_SHA_DATE }}"
+          echo "COMMIT_SHA is: ${{ env.COMMIT_SHA }}"
+          echo "COMMIT_SHA_DATE=${{ env.COMMIT_SHA_DATE }}" >> $GITHUB_OUTPUT
+          echo "COMMIT_SHA=${{ env.COMMIT_SHA }}" >> $GITHUB_OUTPUT
+      - name: Set up JDK 17
+        uses: actions/setup-java@v1
+        with:
+          java-version: 17
+      - name: Cache SonarQube packages
+        uses: actions/cache@v1
+        with:
+          path: ~/.sonar/cache
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
+      - name: Cache Maven packages
+        uses: actions/cache@v1
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2
+      - name: Build and analyze
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_ANALYSIS_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        run: |
+          mvn -DskipTests=true package
+          mvn -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar
+      - name: Upload Maven Env
+        uses: actions/upload-artifact@v3
+        with:
+          name: maven-artifacts
+          path: .
+          github-token: ${{ secrets.GH_PAT }}
+
+  ##################################################################################################
+  ##  sonarqube:                                                                                  ##
+  ##    trigger code scan using sonarqube-scan-action (3rd part github action)                    ##
+  ##################################################################################################
+  sonarqube:
+    name: SonarQubeTrigger
+    environment: smbc-dev
+    needs: javabuild
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checking out
+      uses: actions/checkout@master
+      with:
+        # Disabling shallow clone is recommended for improving relevancy of reporting
+        fetch-depth: 0
+    - name: Print secrets
+      shell: bash
+      env:
+        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}   # Generate a token on SonarQube, add it to the secrets of this repo with the name SONAR_TOKEN (Settings > Secrets > Actions > add new repository secret)
+        SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}   # add the URL of your instance to the secrets of this repo with the name SONAR_HOST_URL (Settings > Secrets > Actions > add new repository secret)
+      run:  |
+        echo host: "$SONAR_HOST_URL"
+        echo token: "$SONAR_TOKEN"
+
+      # Download workspace from archive build
+    - name: Synchronize workspace
+      uses: actions/download-artifact@v3
+#     uses: actions/download-artifact@v2
+      with:
+        name: maven-artifacts
+        github-token: ${{ secrets.GH_PAT }}
+        path: .
+          
+    - name: Analyze with SonarQube
+
+      # You can pin the exact commit or the version.
+      uses: SonarSource/sonarqube-scan-action@v2.0.1
+      env:
+        GITHUB_TOKEN: "${{ secrets.GH_PAT }}"  # Needed to get PR information
+        SONAR_TOKEN: "${{ secrets.SONAR_TOKEN }}"   # Generate a token on SonarQube, add it to the secrets of this repo with the name SONAR_TOKEN (Settings > Secrets > Actions > add new repository secret)
+        SONAR_HOST_URL: "${{ secrets.SONAR_HOST_URL }}"   # add the URL of your instance to the secrets of this repo with the name SONAR_HOST_URL (Settings > Secrets > Actions > add new repository secret)
+      with:
+        # Additional arguments for the sonarcloud scanner
+        args:
+          # Unique key of your project. You can find it in SonarQube > [my project] > Project Information (top-right menu)
+          # mandatory
+          -Dsonar.projectKey=smbc-demo
+          -Dsonar.exclusions=**/*.java
+          -Dsonar.sources=src/main/java
+          -Dsonar.tests=src/test
+          -Dsonar.test.inclusions=src/test/**/*
+          -Dsonar.language=java
+          -Dsonar.java.binaries=target/classes
+          # Comma-separated paths to directories containing main source files.
+          #-Dsonar.sources= # optional, default is project base directory
+          # When you need the analysis to take place in a directory other than the one from which it was launched
+          #-Dsonar.projectBaseDir= # optional, default is .
+          # Comma-separated paths to directories containing test source files.
+          #-Dsonar.tests= # optional. For more info about Code Coverage, please refer to https://docs.sonarcloud.io/enriching/test-coverage/overview/
+          # Adds more detail to both client and server-side analysis logs, activating DEBUG mode for the scanner, and adding client-side environment variables and system properties to the server-side log of analysis report processing.
+          #-Dsonar.verbose= # optional, default is false
+           
+  ##################################################################################################
+  ##  dockerimagebuild:                                                                           ##
+  ##    build the image - docker strategy using buildah image                                     ##
+  ##       psql-client                                                                            ##
+  ##################################################################################################
+  dockerimagebuild:
+    name: DockerfileImageBuild
+    #environment: ${{ inputs.ENVIRONMENT }}
+    environment: smbc-dev
+    needs: [javabuild, sonarqube]
+    runs-on: [self-hosted, buildah]
+    if: ${{ vars.PUSH_DATABASE }} == true
+
+    steps:
+
+      # Download workspace from archive build
+      - name: Synchronize workspace
+#       uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v2
+        with:
+          name: maven-artifacts
+          github-token: ${{ secrets.GH_PAT }}
+
+      # Checkout buildah action github repository
+      - name: Checkout Buildah action
+#       uses: actions/checkout@v2
+        uses: actions/checkout@v4
+        with:
+          path: "buildah-build"
+
+      # podman login to the registry
+      - name: Log in to Red Hat Registry
+        uses: redhat-actions/podman-login@v1
+        with:
+          registry: registry.redhat.io
+          username: ${{ secrets.REGISTRY_REDHAT_IO_USER }}
+          password: ${{ secrets.REGISTRY_REDHAT_IO_PASSWORD }}
+          auth_file_path: "/home/runner/config.json"
+
+      - name: Buildah Action
+        id: build-image
+        uses: redhat-actions/buildah-build@v2
+        env:
+          COMMIT_SHA: ${{ needs.javabuild.outputs.COMMIT_SHA }}
+          COMMIT_SHA_DATE: ${{ needs.javabuild.outputs.COMMIT_SHA_DATE }}
+        with:
+          image: ${{ vars.IMAGE_NAME_2 }}
+          tags: ${{ env.COMMIT_SHA }} ${{ env.COMMIT_SHA_DATE }}
+          containerfiles: |
+            ./Containerfile.psql-client
+
+      # Podman Login action (https://github.com/redhat-actions/podman-login) also be used to log in,
+      # in which case 'username' and 'password' can be omitted.
+      - name: Push To Nexus
+        id: push-to-nexus
+        uses: redhat-actions/push-to-registry@v2
+        with:
+          image: ${{ steps.build-image.outputs.image }}
+          tags: ${{ steps.build-image.outputs.tags }}
+          registry: ${{ vars.NEXUS_REGISTRY_URL }}
+          username: ${{ vars.NEXUS_USER }}
+          password: ${{ secrets.NEXUS_PASSWORD }}
+
+      - name: Print image url
+        run: echo "Image pushed to ${{ steps.push-to-nexus.outputs.registry-paths }}"
+
+  ##################################################################################################
+  ## s2iimagebuild:                                                                               ##
+  ##   create a transient build config used to trigger an s2i build                               ##
+  ##################################################################################################
+  s2iimagebuild:
+    name: S2I image build
+    needs: [javabuild, sonarqube]
+    environment: smbc-dev
+    runs-on: [self-hosted, k8s-tools]
+
+    steps:
+
+      # Download workspace from archive build
+      - name: Synchronize workspace
+#       uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v2
+        with:
+          name: maven-artifacts
+          github-token: ${{ secrets.GH_PAT }}
+
+      # Run s2i build
+      - name: S2I build
+        id: s2i-build-image
+        env:
+          OC_TOKEN: ${{ secrets.HELPER_OC_TOKEN }}
+          OC_API_URL: ${{ vars.OC_API_URL }}
+          BUILD_NAME: "gh-job-${{ github.job }}"
+          S2I_BUILDER_PULL_SPEC: ${{ vars.S2I_BUILDER_PULL_SPEC }}
+          S2I_BUILDER_PUSH_SPEC: "${{ vars.NEXUS_REGISTRY_URL }}/${{ vars.IMAGE_NAME }}:${{ needs.javabuild.outputs.COMMIT_SHA }}"
+          S2I_SOURCE_REPO_URL: ${{ vars.S2I_SOURCE_REPO_URL }}
+        run: |
+          echo "S2I_BUILDER_PUSH_SPEC=${{ env.S2I_BUILDER_PUSH_SPEC }}" >> $GITHUB_ENV
+          oc login --insecure-skip-tls-verify=true --token ${{ env.OC_TOKEN }} ${{ env.OC_API_URL }}
+          oc new-build --name=${{ env.BUILD_NAME}}  --strategy=source --source-secret=git-ssh  ${{ env.S2I_BUILDER_PULL_SPEC }}~${{ env.S2I_SOURCE_REPO_URL}} --to-docker=true --to ${{ env.S2I_BUILDER_PUSH_SPEC }}
+          oc start-build ${{ env.BUILD_NAME }} --wait --follow
+          oc delete bc ${{ env.BUILD_NAME }}
+          oc logout
+
+      - name: Print image url
+        run: echo "Image pushed to ${{ env.S2I_BUILDER_PUSH_SPEC }}"
+
+  ##################################################################################################
+  ##  imagescan:                                                                                  ##
+  ##    images to scan...                                                                         ##
+  ##      psql-client (postgresql client for psql calls) --- NOT INCLUDED IN THIS FLOW            ##
+  ##      springboot-postgres-demo (the springboot application that uses postgresql backend)      ##
+  ##################################################################################################
+  imagescan:
+    name: ScanOCIImage
+    environment: smbc-dev
+    needs: [javabuild, sonarqube, s2iimagebuild]
+    runs-on: [self-hosted, image-scan]
+
+    steps:
+      - name: Scan OCI image
+        env:
+          ROX_API_TOKEN: "${{ secrets.ROX_API_TOKEN }}"  # Needed for authentication to ACS
+          ROX_CENTRAL_ADDRESS: "${{ vars.ROX_CENTRAL_ADDRESS }}" # URL for ACS central instance
+          ROX_AUTH_MACHINE_TO_MACHINE: "${{ vars.ROX_AUTH_MACHINE_TO_MACHINE }}"
+          ROX_ENDPOINT: "${{ vars.ROX_ENDPOINT }}"  # central host + port
+          ROX_SCAN_CLUSTER: "${{ vars.ROX_SCAN_CLUSTER }}"
+          NEXUS_REGISTRY: "${{ vars.NEXUS_REGISTRY_URL }}"
+          IMAGE_NAME: "${{ vars.IMAGE_NAME }}"
+          IMAGE_TAG: "${{ needs.javabuild.outputs.COMMIT_SHA }}"
+        run: |
+          echo "ROX env:"
+          echo "  ROX_API_TOKEN: ${{ env.ROX_API_TOKEN }}"
+          echo "  ROX_CENTRAL_ADDRESS: ${{ env.ROX_CENTRAL_ADDRESS }}"
+          echo "  ROX_AUTH_MACHINE_TO_MACHINE: ${{ env.ROX_AUTH_MACHINE_TO_MACHINE }}"
+          echo "  ROX_ENDPOINT: ${{ env.ROX_ENDPOINT }}"
+          cp /home/runner/generate_uuid.py .
+          output_name=$(python3 ./generate_uuid.py)"-scan.json"
+          roxctl image scan --image="${{ env.NEXUS_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}"        \
+              --cluster="${{ env.ROX_SCAN_CLUSTER }}" > $output_name
+          critical_vulns=$(jq '.scan.components[] | select( .vulns != null ) | .vulns[] | select( .severity == "CRITICAL_VULNERABILITY_SEVERITY" )' $output_name | grep "cve" | wc -l)
+          important_vulns=$(jq '.scan.components[] | select( .vulns != null ) | .vulns[] | select( .severity == "IMPORTANT_VULNERABILITY_SEVERITY" and .fixedBy != null )' $output_name | grep "cve" | wc -l)
+          if [[ $critical_vulns -gt 0 ]]; then
+            echo "CRITICAL_VULNERABILITIES=true" >> $GITHUB_ENV
+            echo "Failing pipeline due to CRITICAL VULNERABILITIES!!!"
+            jq '.scan.components[] | select( .vulns != null ) | .vulns[] | select( .severity == "CRITICAL_VULNERABILITY_SEVERITY" )'
+          else
+            echo "CRITICAL_VULNERABILITIES=false" >> $GITHUB_ENV
+          fi
+          if [[ $important_vulns -gt 0 ]]; then
+            echo "IMPORTANT_VULNERABILITIES=true" >> $GITHUB_ENV
+            echo "Failing pipeline due to IMPORTANT VULNERABILITIES!!!"
+            jq '.scan.components[] | select( .vulns != null ) | .vulns[] | select( .severity == "IMPORTANT_VULNERABILITY_SEVERITY" and .fixedBy != null )'
+          else
+            echo "IMPORTANT_VULNERABILITIES=false" >> $GITHUB_ENV
+          fi
+          rm -f $output_name
+
+
+  ##################################################################################################
+  ##  deploytodev:                                                                                ##
+  ##    updates deployment.yaml manifest which will trigger an argocd deploy                      ##
+  ##################################################################################################
+  deploytodev:
+    name: DeployToDev
+    environment: smbc-dev
+    needs: [javabuild, sonarqube, s2iimagebuild, imagescan]
+    runs-on: [self-hosted, k8s-tools]
+
+    steps:
+      # checkout the manifest source code
+      - name: Checkout manifest repo
+        uses: actions/checkout@v2
+        with:
+#         repository: abryson-redhat/argocd-demo
+          repository: abryson-demo-organization/argocd-demo
+          token: ${{ secrets.GH_PAT }}
+          ref: ${{ vars.GITOPS_REF }}
+
+      # set path to values.yaml file
+      - name: Set context path
+        env:
+          GITOPS_MANIFEST_CONTEXT_PREFIX: "${{ vars.GITOPS_MANIFEST_CONTEXT_PATH }}"
+          ENVIRONMENT_LABEL: "${{ vars.ENVIRONMENT_LABEL }}"
+        run: |
+          echo "PROJECT_VALUES_PATH=${{ env.GITOPS_MANIFEST_CONTEXT_PREFIX }}/${{ env.ENVIRONMENT_LABEL }}/app-deployment.yaml" >> $GITHUB_ENV
+
+      # set image pull spec for the application
+      - name: Set image pull spec for application
+        env:
+          APP_PULL_SPEC: "${{ vars.NEXUS_REGISTRY_URL }}/smbc-demo/${{ vars.IMAGE_NAME }}:${{ needs.javabuild.outputs.COMMIT_SHA }}"
+        run: |
+          echo "APP_PULL_SPEC=${{ env.APP_PULL_SPEC }}" >> $GITHUB_ENV
+          echo "COMMIT_MESSAGE=image updates --- application pull spec: ${{ env.APP_PULL_SPEC }}" >> $GITHUB_ENV
+
+      # set image pull spec for the psql client
+      - name: Set image pull spec for psql client
+        if: ${{ vars.PUSH_DATABASE }} == true
+        env:
+          APP_PULL_SPEC_2: "${{ vars.NEXUS_REGISTRY_URL }}/smbc-demo/${{ vars.IMAGE_NAME_2 }}:${{ needs.javabuild.outputs.COMMIT_SHA }}"
+        run: |
+          echo "APP_PULL_SPEC_2=${{ env.APP_PULL_SPEC_2 }}" >> $GITHUB_ENV
+          echo "COMMIT_MESSAGE=${{ env.COMMIT_MESSAGE }}, psql pull spec: ${{ env.APP_PULL_SPEC_2 }}" >> $GITHUB_ENV
+
+      # update image tag within deployment for application
+      - name: Update image tag in deployment for application
+        run: |
+          yq -i '.spec.template.spec.containers[0].image = "${{ env.APP_PULL_SPEC }}"' ${{ env.PROJECT_VALUES_PATH }}
+
+      # update image tag within deployment for psql client
+      - name: Update image tag in deployment for psql
+        if: ${{ vars.PUSH_DATABASE }} == true
+        run: |
+          yq -i '.spec.template.spec.initContainers[0].image = "${{ env.APP_PULL_SPEC_2 }}"' ${{ env.PROJECT_VALUES_PATH }}
+
+      # push to manifest repo
+      - name: Push to manifest repo
+        run: |
+          git config --global user.email "${{ secrets.SMBC_GH_EMAIL }}"
+          git config --global user.name "${{ secrets.SMBC_GH_USER }}"
+          git add "${{ env.PROJECT_VALUES_PATH }}"
+          git commit -m "${{ env.COMMIT_MESSAGE }}"
+          git push
