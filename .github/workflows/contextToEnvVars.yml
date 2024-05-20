@@ -1,8 +1,10 @@
 name: Context to Env Vars
 on:
-  push:
-    branches:
-      - main # the name of your main branch
+  workflow_dispatch:
+    inputs:
+      GARBAGE_PARM:
+        required: true
+        type: string
 jobs:
   contexttoenvvars:
     name: contextToEnvVars
