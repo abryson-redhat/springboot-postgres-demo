@@ -1,0 +1,21 @@
+name: Context to Env Vars
+on:
+  push:
+    branches:
+      - main # the name of your main branch
+jobs:
+  contexttoenvvars:
+    name: contextToEnvVars
+    environment: smbc-dev
+    runs-on: [self-hosted, k8s-tools]
+
+    steps:
+      - name: Expose github environment as shell variables
+        env:
+          SECRETS_CONTEXT: ${{ toJson(secrets) }}
+          VARS_CONTEXT: ${{ toJson(vars) }}
+        run: |
+          EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+          to_envs() { jq -r "to_entries[] | \"\(.key)<<$EOF\n\(.value)\n$EOF\n\""; }
+          echo "$VARS_CONTEXT" | to_envs >> $GITHUB_ENV
+          echo "$SECRETS_CONTEXT" | to_envs >> $GITHUB_ENV
