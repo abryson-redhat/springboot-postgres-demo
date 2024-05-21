@@ -167,8 +167,8 @@ jobs:
 
       # Checkout buildah action github repository
       - name: Checkout Buildah action
-#       uses: actions/checkout@v2
-        uses: actions/checkout@v4
+        uses: actions/checkout@v2
+#       uses: actions/checkout@v4
         with:
           path: "buildah-build"
 
@@ -237,7 +237,7 @@ jobs:
           OC_API_URL: ${{ vars.OC_API_URL }}
           BUILD_NAME: "gh-job-${{ github.job }}"
           S2I_BUILDER_PULL_SPEC: ${{ vars.S2I_BUILDER_PULL_SPEC }}
-          S2I_BUILDER_PUSH_SPEC: "${{ vars.NEXUS_REGISTRY_URL }}/${{ vars.IMAGE_NAME }}:${{ needs.javabuild.outputs.COMMIT_SHA }}"
+          S2I_BUILDER_PUSH_SPEC: "${{ vars.NEXUS_REGISTRY_URL }}/smbc-demo/${{ vars.IMAGE_NAME }}:${{ needs.javabuild.outputs.COMMIT_SHA }}"
           S2I_SOURCE_REPO_URL: ${{ vars.S2I_SOURCE_REPO_URL }}
         run: |
           echo "S2I_BUILDER_PUSH_SPEC=${{ env.S2I_BUILDER_PUSH_SPEC }}" >> $GITHUB_ENV
