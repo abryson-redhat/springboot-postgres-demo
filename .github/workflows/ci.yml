@@ -16,8 +16,10 @@ on:
 #       type: string
 jobs:
   ##################################################################################################
+  ##                                                                                              ##
   ##  javabuild:                                                                                  ##
   ##     using maven to build java archive                                                        ##
+  ##                                                                                              ##
   ##################################################################################################
   javabuild:
     name: BuildJavaArchive
@@ -186,7 +188,8 @@ jobs:
           COMMIT_SHA: ${{ needs.javabuild.outputs.COMMIT_SHA }}
           COMMIT_SHA_DATE: ${{ needs.javabuild.outputs.COMMIT_SHA_DATE }}
         with:
-          image: ${{ vars.IMAGE_NAME_2 }}
+#         image: ${{ vars.IMAGE_NAME_2 }}
+          image: "${{ vars.NEXUS_REGISTRY_URL }}/smbc-demo/${{ vars.IMAGE_NAME_2 }}"
           tags: ${{ env.COMMIT_SHA }} ${{ env.COMMIT_SHA_DATE }}
           containerfiles: |
             ./Containerfile.psql-client
